@@ -1,0 +1,2 @@
+file_path,file_name,prediction,prediction_label,probability_healthy,probability_pd,confidence,confidence_percentage
+D:\Parkinson\parkinson_voice_model\dataset\italian_dataset\PwPD\6-10\speech\B1\B1lbuairgo52M1606161810.wav,B1lbuairgo52M1606161810.wav,1,Parkinson's Disease,0.07181650400161743,0.9281834959983826,0.9281834959983826,92.8%

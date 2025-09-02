@@ -1,2 +1,2 @@
 timestamp,total_samples,training_samples,test_samples,test_accuracy,test_auc,cv_mean_accuracy,cv_std_accuracy,failed_files,model_params
-2025-09-02T13:02:14.406275,391,446,112,0.8839285714285714,0.9279788838612367,0.8317103620474408,0.04469622464222847,0,"{'n_estimators': 100, 'max_depth': 4, 'learning_rate': 0.1, 'subsample': 0.8, 'colsample_bytree': 0.8, 'random_state': 42, 'eval_metric': 'logloss'}"
+2025-09-02T14:56:19.794725,391,446,112,0.8660714285714286,0.9049773755656109,0.8565792759051186,0.027378638646406918,0,"{'n_estimators': 100, 'max_depth': 4, 'learning_rate': 0.1, 'subsample': 0.8, 'colsample_bytree': 0.8, 'random_state': 42, 'eval_metric': 'logloss'}"
