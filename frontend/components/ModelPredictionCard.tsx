@@ -31,7 +31,8 @@ export default function ModelPredictionCard({
   const [isExpanded, setIsExpanded] = useState(false)
 
   const getModelIcon = (modelType: string) => {
-    switch (modelType.toLowerCase()) {
+    const type = (modelType || '').toLowerCase()
+    switch (type) {
       case 'voice analysis':
         return <Mic className="w-5 h-5" />
       case 'datscan analysis':
@@ -44,7 +45,8 @@ export default function ModelPredictionCard({
   }
 
   const getModelColor = (modelType: string) => {
-    switch (modelType.toLowerCase()) {
+    const type = (modelType || '').toLowerCase()
+    switch (type) {
       case 'voice analysis':
         return 'text-blue-600 bg-blue-100'
       case 'datscan analysis':
@@ -146,7 +148,7 @@ export default function ModelPredictionCard({
                 {/* Confidence Gauge */}
                 <div className="flex justify-center">
                   <ModelConfidenceGauge
-                    modelType={result.model_type.toLowerCase().split(' ')[0]}
+                    modelType={(result.model_type || 'voice analysis').toLowerCase().split(' ')[0]}
                     confidence={result.confidence}
                     prediction={result.prediction}
                   />

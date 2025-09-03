@@ -252,7 +252,7 @@ ${multimodalResults.recommendations.map(rec => `• ${rec}`).join('\n')}
                     
                     <div className="text-center">
                       <div className="text-2xl font-bold text-gray-900">
-                        {multimodalResults.models_used.length}
+                        {multimodalResults.models_used?.length || 0}
                       </div>
                       <div className="text-sm text-gray-600">Models Used</div>
                     </div>
@@ -262,7 +262,7 @@ ${multimodalResults.recommendations.map(rec => `• ${rec}`).join('\n')}
                 {/* Confidence Gauge */}
                 <div className="flex justify-center">
                   <FusionConfidenceGauge 
-                    value={multimodalResults.fusion_confidence * 100}
+                    value={(multimodalResults.fusion_confidence || 0) * 100}
                   />
                 </div>
 
@@ -270,28 +270,28 @@ ${multimodalResults.recommendations.map(rec => `• ${rec}`).join('\n')}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-4 text-center shadow-soft">
                     <div className="text-2xl font-bold text-blue-600 mb-1">
-                      {multimodalResults.total_processing_time.toFixed(1)}s
+                      {(multimodalResults.total_processing_time || 0).toFixed(1)}s
                     </div>
                     <div className="text-sm text-gray-600">Processing Time</div>
                   </div>
                   
                   <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-4 text-center shadow-soft">
                     <div className="text-2xl font-bold text-purple-600 mb-1">
-                      {multimodalResults.fusion_weights.voice * 100}%
+                      {(multimodalResults.fusion_weights?.voice || 0) * 100}%
                     </div>
                     <div className="text-sm text-gray-600">Voice Weight</div>
                   </div>
                   
                   <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-4 text-center shadow-soft">
                     <div className="text-2xl font-bold text-purple-600 mb-1">
-                      {multimodalResults.fusion_weights.datscan * 100}%
+                      {(multimodalResults.fusion_weights?.datscan || 0) * 100}%
                     </div>
                     <div className="text-sm text-gray-600">DATScan Weight</div>
                   </div>
                   
                   <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-4 text-center shadow-soft">
                     <div className="text-2xl font-bold text-green-600 mb-1">
-                      {multimodalResults.fusion_weights.spiral * 100}%
+                      {(multimodalResults.fusion_weights?.spiral || 0) * 100}%
                     </div>
                     <div className="text-sm text-gray-600">Spiral Weight</div>
                   </div>
@@ -301,7 +301,7 @@ ${multimodalResults.recommendations.map(rec => `• ${rec}`).join('\n')}
                 <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-6 shadow-soft">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Clinical Summary</h3>
                   <p className="text-gray-700 leading-relaxed">
-                    {multimodalResults.clinical_summary}
+                    {multimodalResults.clinical_summary || 'No clinical summary available.'}
                   </p>
                 </div>
 

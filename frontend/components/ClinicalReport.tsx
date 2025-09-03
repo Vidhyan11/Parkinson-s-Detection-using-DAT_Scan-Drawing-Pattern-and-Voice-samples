@@ -90,7 +90,7 @@ export default function ClinicalReport({ results, patientInfo }: ClinicalReportP
               <div className="flex justify-between">
                 <span className="text-gray-600">Total Processing Time:</span>
                 <span className="font-medium text-gray-900">
-                  {results.total_processing_time.toFixed(1)}s
+                  {(results.total_processing_time || 0).toFixed(1)}s
                 </span>
               </div>
               <div className="flex justify-between">
@@ -214,21 +214,21 @@ export default function ClinicalReport({ results, patientInfo }: ClinicalReportP
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
                   <div className="text-center">
                     <div className="text-lg font-bold text-gray-900">
-                      {(result.confidence * 100).toFixed(0)}%
+                      {((result.confidence || 0) * 100).toFixed(0)}%
                     </div>
                     <div className="text-xs text-gray-600">Confidence</div>
                   </div>
                   
                   <div className="text-center">
                     <div className="text-lg font-bold text-gray-900">
-                      {(result.probability_pd * 100).toFixed(1)}%
+                      {((result.probability_pd || 0) * 100).toFixed(1)}%
                     </div>
                     <div className="text-xs text-gray-600">PD Probability</div>
                   </div>
                   
                   <div className="text-center">
                     <div className="text-lg font-bold text-gray-900">
-                      {result.processing_time.toFixed(1)}s
+                      {(result.processing_time || 0).toFixed(1)}s
                     </div>
                     <div className="text-xs text-gray-600">Processing Time</div>
                   </div>
