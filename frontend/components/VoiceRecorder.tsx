@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Mic, Square, Play, Pause, RotateCcw } from 'lucide-react'
+import { Mic, Square, Play, Pause, RotateCcw, Upload, FileAudio, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 
 interface VoiceRecorderProps {
@@ -10,7 +10,7 @@ interface VoiceRecorderProps {
     blob: Blob
     url: string
     duration: number
-    type: 'recorded'
+    type: 'recorded' | 'uploaded'
   }) => void
 }
 
@@ -22,6 +22,9 @@ export default function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [hasRecording, setHasRecording] = useState(false)
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -30,6 +33,7 @@ export default function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
   const streamRef = useRef<MediaStream | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number>()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Initialize audio context for visualization
   useEffect(() => {
@@ -82,6 +86,8 @@ export default function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
         setAudioBlob(audioBlob)
         setAudioUrl(audioUrl)
         setHasRecording(true)
+        setUploadedFile(null) // Clear uploaded file when recording
+        setError(null)
         
         // Convert to WAV format (simplified - in production use proper conversion)
         convertToWav(audioBlob)
@@ -98,13 +104,11 @@ export default function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
       }, 1000)
       
       // Start visualization
-      startVisualization(stream)
-      
-      toast.success('Recording started')
+      startVisualization()
       
     } catch (error) {
-      console.error('Error starting recording:', error)
-      toast.error('Failed to start recording. Please check microphone permissions.')
+      console.error('Failed to start recording:', error)
+      toast.error('Failed to access microphone. Please check permissions.')
     }
   }, [])
 
@@ -119,45 +123,108 @@ export default function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
         timerRef.current = null
       }
       
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
-      
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop())
         streamRef.current = null
       }
       
-      toast.success('Recording stopped')
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
     }
   }, [isRecording])
 
   const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      if (isPaused) {
-        mediaRecorderRef.current.resume()
-        setIsPaused(false)
-        toast.success('Recording resumed')
-      } else {
-        mediaRecorderRef.current.pause()
-        setIsPaused(true)
-        toast.success('Recording paused')
+    if (mediaRecorderRef.current && isRecording && !isPaused) {
+      mediaRecorderRef.current.pause()
+      setIsPaused(true)
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
       }
     }
   }, [isRecording, isPaused])
+
+  const resumeRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording && isPaused) {
+      mediaRecorderRef.current.resume()
+      setIsPaused(false)
+      
+      // Restart timer
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1)
+      }, 1000)
+    }
+  }, [isRecording, isPaused])
+
+  const startVisualization = useCallback(() => {
+    if (!canvasRef.current) return
+    
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    
+    const draw = () => {
+      if (!isRecording) return
+      
+      // Create a simple waveform visualization
+      const bars = 50
+      const barWidth = canvas.width / bars
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = '#3b82f6'
+      
+      for (let i = 0; i < bars; i++) {
+        const height = Math.random() * 60 + 20
+        const x = i * barWidth
+        const y = (canvas.height - height) / 2
+        
+        ctx.fillRect(x, y, barWidth - 2, height)
+      }
+      
+      animationFrameRef.current = requestAnimationFrame(draw)
+    }
+    
+    draw()
+  }, [isRecording])
+
+  const convertToWav = useCallback((blob: Blob) => {
+    // In a real implementation, you would convert the audio to WAV format
+    // For now, we'll use the original blob
+    const wavBlob = new Blob([blob], { type: 'audio/wav' })
+    setAudioBlob(wavBlob)
+  }, [])
+
+  const playAudio = useCallback(() => {
+    if (!audioRef.current || !audioUrl) return
+    
+    if (isPlaying) {
+      audioRef.current.pause()
+      setIsPlaying(false)
+    } else {
+      audioRef.current.src = audioUrl
+      audioRef.current.play()
+      setIsPlaying(true)
+      
+      audioRef.current.onended = () => setIsPlaying(false)
+    }
+  }, [audioUrl, isPlaying])
+
+  const stopAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      setIsPlaying(false)
+    }
+  }, [])
 
   const resetRecording = useCallback(() => {
     setAudioBlob(null)
     setAudioUrl(null)
     setHasRecording(false)
     setRecordingTime(0)
-    setIsRecording(false)
-    setIsPaused(false)
-    
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
+    setError(null)
     
     if (audioRef.current) {
       audioRef.current.pause()
@@ -166,224 +233,332 @@ export default function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
     }
   }, [])
 
-  const playRecording = useCallback(() => {
-    if (audioRef.current && audioUrl) {
-      if (isPlaying) {
-        audioRef.current.pause()
-        setIsPlaying(false)
-      } else {
-        audioRef.current.src = audioUrl
-        audioRef.current.play()
-        setIsPlaying(true)
-        
-        audioRef.current.onended = () => setIsPlaying(false)
-      }
-    }
-  }, [audioUrl, isPlaying])
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-  const convertToWav = async (blob: Blob) => {
+    setError(null)
+    setIsProcessing(true)
+
     try {
-      // In a real implementation, you would convert the audio to WAV format
-      // For now, we'll use the original blob but simulate WAV conversion
-      const wavBlob = new Blob([blob], { type: 'audio/wav' })
+      // Validate file
+      if (!file.name.toLowerCase().endsWith('.wav') && !file.name.toLowerCase().endsWith('.mp3')) {
+        throw new Error('Only WAV and MP3 files are supported')
+      }
+
+      if (file.size > 50 * 1024 * 1024) { // 50MB
+        throw new Error('File size must be less than 50MB')
+      }
+
+      // Validate audio file
+      const isValidAudio = await validateAudioFile(file)
+      if (!isValidAudio) {
+        throw new Error('Invalid audio file. Please ensure it\'s a valid audio file.')
+      }
+
+      // Get audio duration
+      const duration = await getAudioDuration(file)
+      if (duration < 0.5) {
+        throw new Error('Audio duration must be at least 0.5 seconds')
+      }
+      if (duration > 60) {
+        throw new Error('Audio duration must be less than 60 seconds')
+      }
+
+      setUploadedFile(file)
+      setHasRecording(false) // Clear recording when file is uploaded
+      setAudioBlob(null)
+      setAudioUrl(null)
+      setError(null)
       
-      // Calculate duration from the recording time
-      const duration = recordingTime
-      
+      toast.success('Audio file uploaded successfully!')
+
+      // Convert to blob and create URL
+      const blob = new Blob([file], { type: 'audio/wav' })
+      const url = URL.createObjectURL(blob)
+
       onAudioReady({
-        blob: wavBlob,
-        url: audioUrl || '',
+        blob,
+        url,
         duration,
+        type: 'uploaded'
+      })
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process file'
+      setError(errorMessage)
+      toast.error(errorMessage)
+    } finally {
+      setIsProcessing(false)
+    }
+  }, [onAudioReady])
+
+  const validateAudioFile = async (file: File): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const audio = new Audio()
+      const url = URL.createObjectURL(file)
+      
+      audio.oncanplay = () => {
+        URL.revokeObjectURL(url)
+        resolve(true)
+      }
+      
+      audio.onerror = () => {
+        URL.revokeObjectURL(url)
+        resolve(false)
+      }
+      
+      audio.src = url
+    })
+  }
+
+  const getAudioDuration = async (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const audio = new Audio()
+      const url = URL.createObjectURL(file)
+      
+      audio.onloadedmetadata = () => {
+        URL.revokeObjectURL(url)
+        resolve(audio.duration)
+      }
+      
+      audio.onerror = () => {
+        URL.revokeObjectURL(url)
+        resolve(0)
+      }
+      
+      audio.src = url
+    })
+  }
+
+  const removeUploadedFile = useCallback(() => {
+    setUploadedFile(null)
+    setError(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
+
+  const handleSubmit = useCallback(() => {
+    if (uploadedFile) {
+      // File already processed in handleFileUpload
+      return
+    }
+    
+    if (audioBlob && hasRecording) {
+      onAudioReady({
+        blob: audioBlob,
+        url: audioUrl!,
+        duration: recordingTime,
         type: 'recorded'
       })
-      
-    } catch (error) {
-      console.error('Error converting to WAV:', error)
-      toast.error('Error processing audio')
     }
-  }
+  }, [uploadedFile, audioBlob, hasRecording, audioUrl, recordingTime, onAudioReady])
 
-  const startVisualization = (stream: MediaStream) => {
-    if (!canvasRef.current) return
-    
-    const audioContext = new AudioContext()
-    const analyser = audioContext.createAnalyser()
-    const source = audioContext.createMediaStreamSource(stream)
-    
-    source.connect(analyser)
-    analyser.fftSize = 256
-    const bufferLength = analyser.frequencyBinCount
-    const dataArray = new Uint8Array(bufferLength)
-    
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    
-    const draw = () => {
-      animationFrameRef.current = requestAnimationFrame(draw)
-      
-      analyser.getByteFrequencyData(dataArray)
-      
-      ctx.fillStyle = 'rgb(248, 250, 252)'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      
-      const barWidth = (canvas.width / bufferLength) * 2.5
-      let barHeight
-      let x = 0
-      
-      for (let i = 0; i < bufferLength; i++) {
-        barHeight = (dataArray[i] / 255) * canvas.height
-        
-        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
-        gradient.addColorStop(0, '#0ea5e9')
-        gradient.addColorStop(1, '#0284c7')
-        
-        ctx.fillStyle = gradient
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight)
-        
-        x += barWidth + 1
-      }
-    }
-    
-    draw()
-  }
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60)
+    const seconds = time % 60
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
   }
 
   return (
-    <div className="space-y-6">
-      {/* Recording Controls */}
-      <div className="flex justify-center space-x-4">
-        {!isRecording && !hasRecording && (
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={startRecording}
-            className="w-16 h-16 bg-danger-500 hover:bg-danger-600 text-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200"
-          >
-            <Mic className="w-8 h-8" />
-          </motion.button>
-        )}
-        
-        {isRecording && (
-          <>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={pauseRecording}
-              className="w-12 h-12 bg-warning-500 hover:bg-warning-600 text-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200"
-            >
-              {isPaused ? <Play className="w-6 h-6" /> : <Pause className="w-6 h-6" />}
-            </motion.button>
-            
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={stopRecording}
-              className="w-12 h-12 bg-gray-500 hover:bg-gray-600 text-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200"
-            >
-              <Square className="w-6 h-6" />
-            </motion.button>
-          </>
-        )}
-        
-        {hasRecording && !isRecording && (
-          <>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={playRecording}
-              className="w-12 h-12 bg-primary-500 hover:bg-primary-600 text-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200"
-            >
-              {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-            </motion.button>
-            
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={resetRecording}
-              className="w-12 h-12 bg-gray-500 hover:bg-gray-600 text-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200"
-            >
-              <RotateCcw className="w-6 h-6" />
-            </motion.button>
-          </>
-        )}
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-4"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-blue-100 rounded-lg">
+          <Mic className="w-5 h-5 text-blue-600" />
+        </div>
+        <div>
+          <h3 className="text-lg font-medium text-gray-900">Voice Analysis</h3>
+          <p className="text-sm text-gray-600">
+            Record your voice or upload an audio file for analysis
+          </p>
+        </div>
       </div>
 
-      {/* Recording Status */}
-      <AnimatePresence>
-        {isRecording && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="text-center"
-          >
-            <div className="flex items-center justify-center space-x-2 mb-2">
-              <div className="w-3 h-3 bg-danger-500 rounded-full animate-pulse"></div>
-              <span className="text-danger-600 font-medium">
-                {isPaused ? 'Recording Paused' : 'Recording...'}
-              </span>
+      {/* File Upload Section */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center gap-4 mb-4">
+          <label className="px-4 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+            <Upload className="w-4 h-4" />
+            Upload Audio File
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/wav,audio/mp3"
+              onChange={handleFileUpload}
+              disabled={isProcessing}
+              className="hidden"
+            />
+          </label>
+          
+          {uploadedFile && (
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+              <FileAudio className="w-4 h-4 text-green-600" />
+              <span className="text-sm text-green-800">{uploadedFile.name}</span>
+              <button
+                onClick={removeUploadedFile}
+                className="text-green-600 hover:text-green-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <div className="text-2xl font-mono font-bold text-text-primary">
-              {formatTime(recordingTime)}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </div>
 
-      {/* Waveform Visualization */}
-      <div className="relative">
-        <canvas
-          ref={canvasRef}
-          width={400}
-          height={100}
-          className="w-full h-24 bg-gray-100 rounded-lg border border-border mx-auto"
-        />
-        {!isRecording && !hasRecording && (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-            <div className="text-center">
-              <Mic className="w-8 h-8 mx-auto mb-2" />
-              <p className="text-sm">Click record to start</p>
-            </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
+
+        {isProcessing && (
+          <div className="flex items-center gap-2 text-blue-600">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            <span>Processing audio file...</span>
           </div>
         )}
       </div>
 
-      {/* Instructions */}
-      <div className="text-center text-sm text-text-secondary">
-        <p className="mb-2">
-          <strong>Tip:</strong> Speak clearly and maintain a steady volume
-        </p>
-        <p>
-          Recommended: Say "ah" for 3-5 seconds or read a short passage
-        </p>
+      {/* Recording Section */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="text-center mb-4">
+          <p className="text-sm text-gray-600 mb-2">Or record your voice directly</p>
+          
+          {/* Recording Controls */}
+          <div className="flex items-center justify-center gap-3">
+            {!isRecording ? (
+              <button
+                onClick={startRecording}
+                disabled={isProcessing}
+                className="px-6 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 disabled:opacity-50 disabled:cursor-notowed flex items-center gap-2"
+              >
+                <Mic className="w-5 h-5" />
+                Start Recording
+              </button>
+            ) : (
+              <>
+                {!isPaused ? (
+                  <button
+                    onClick={pauseRecording}
+                    className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 flex items-center gap-2"
+                  >
+                    <Pause className="w-4 h-4" />
+                    Pause
+                  </button>
+                ) : (
+                  <button
+                    onClick={resumeRecording}
+                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
+                  >
+                    <Play className="w-4 h-4" />
+                    Resume
+                  </button>
+                )}
+                
+                <button
+                  onClick={stopRecording}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-2"
+                >
+                  <Square className="w-4 h-4" />
+                  Stop
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Recording Timer */}
+          {isRecording && (
+            <div className="mt-3">
+              <div className="text-2xl font-mono text-red-600">
+                {formatTime(recordingTime)}
+              </div>
+              <div className="text-sm text-gray-500">
+                {isPaused ? 'Paused' : 'Recording...'}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Audio Visualization */}
+        {isRecording && (
+          <div className="flex justify-center mb-4">
+            <canvas
+              ref={canvasRef}
+              width={400}
+              height={100}
+              className="border border-gray-300 rounded-lg"
+            />
+          </div>
+        )}
+
+        {/* Audio Playback Controls */}
+        {(hasRecording || uploadedFile) && (
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={playAudio}
+              disabled={!audioUrl}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              {isPlaying ? 'Pause' : 'Play'}
+            </button>
+            
+            <button
+              onClick={stopAudio}
+              disabled={!audioUrl}
+              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <Square className="w-4 h-4" />
+              Stop
+            </button>
+            
+            <button
+              onClick={resetRecording}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Reset
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Recording Complete */}
-      <AnimatePresence>
-        {hasRecording && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-green-50 border border-green-200 rounded-lg p-4 text-center"
+      {/* Submit Button */}
+      {(hasRecording || uploadedFile) && (
+        <div className="flex justify-center">
+          <button
+            onClick={handleSubmit}
+            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
           >
-            <div className="flex items-center justify-center space-x-2 text-green-700">
-              <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
-                <div className="w-2 h-2 bg-white rounded-full"></div>
-              </div>
-              <span className="font-medium">Recording Complete!</span>
-            </div>
-            <p className="text-green-600 text-sm mt-1">
-              Your voice sample is ready for analysis
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+            <Mic className="w-5 h-5" />
+            Submit Audio for Analysis
+          </button>
+        </div>
+      )}
+
+      {/* Information */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex items-start gap-3">
+          <div className="p-1 bg-blue-100 rounded">
+            <Mic className="w-4 h-4 text-blue-600" />
+          </div>
+          <div className="text-sm text-blue-800">
+            <p className="font-medium mb-1">Voice Analysis Information</p>
+            <ul className="space-y-1 text-blue-700">
+              <li>• Analyzes 35 acoustic biomarkers including pitch, jitter, and shimmer</li>
+              <li>• Optimal recording time: 10-30 seconds of sustained vowel sound</li>
+              <li>• Supported formats: WAV, MP3 (max 50MB)</li>
+              <li>• Weight: 20% in final fusion decision</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </motion.div>
   )
 }

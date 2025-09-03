@@ -1,22 +1,28 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import logging
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import traceback
 import os
 import tempfile
 import base64
 from pathlib import Path
+import json
 
 # Import your services
 from services.feature_extractor import VoiceFeatureExtractor
 from utils.model_loader import ModelLoader
 from services.voice_analyzer import VoiceAnalyzer
 from models.prediction_models import PredictionResponse, AudioRecordingRequest
+
+# Import multimodal services
+from services.multimodal_service import MultimodalAnalysisService
+from services.datscan_service import DATScanAnalysisService
+from services.spiral_service import SpiralAnalysisService
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -157,6 +163,96 @@ async def get_features_info():
     except Exception as e:
         logger.error(f"Features info error: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get features information")
+
+@app.post("/multimodal-analysis")
+async def multimodal_analysis(
+    voice_file: Optional[UploadFile] = File(None),
+    datscan_file: Optional[UploadFile] = File(None),
+    spiral_data: Optional[str] = Form(None),
+    patient_age: Optional[str] = Form(None),
+    patient_gender: Optional[str] = Form(None)
+):
+    """Multi-modal Parkinson's disease detection using late fusion"""
+    try:
+        # Initialize multimodal service
+        multimodal_service = MultimodalAnalysisService()
+        
+        # Prepare analysis data
+        analysis_data = {
+            'voice_file': voice_file,
+            'datscan_file': datscan_file,
+            'spiral_data': spiral_data,
+            'patient_age': patient_age,
+            'patient_gender': patient_gender
+        }
+        
+        # Perform multimodal analysis
+        result = await multimodal_service.analyze_multimodal(analysis_data)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Multimodal analysis error: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Multimodal analysis failed: {str(e)}")
+
+@app.post("/datscan-analyze")
+async def datscan_analysis(file: UploadFile = File(...)):
+    """Analyze DATScan image for Parkinson's detection"""
+    try:
+        datscan_service = DATScanAnalysisService()
+        
+        # Validate file
+        if not file.filename.lower().endswith(('.dcm', '.nii', '.jpg', '.png')):
+            raise HTTPException(status_code=400, detail="Unsupported file format. Please upload DICOM, NIfTI, JPG, or PNG files.")
+        
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        try:
+            result = await datscan_service.analyze_datscan(temp_file_path)
+            return result
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DATScan analysis error: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"DATScan analysis failed: {str(e)}")
+
+@app.post("/spiral-analyze")
+async def spiral_analysis(
+    spiral_data: str = Form(...),
+    drawing_time: Optional[float] = Form(None)
+):
+    """Analyze spiral drawing for Parkinson's detection"""
+    try:
+        spiral_service = SpiralAnalysisService()
+        
+        # Decode base64 image data
+        try:
+            # Remove data URL prefix if present
+            if spiral_data.startswith('data:image'):
+                spiral_data = spiral_data.split(',')[1]
+            
+            result = await spiral_service.analyze_spiral(spiral_data, drawing_time)
+            return result
+        except Exception as decode_error:
+            raise HTTPException(status_code=400, detail="Invalid spiral image data")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Spiral analysis error: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Spiral analysis failed: {str(e)}")
 
 @app.post("/predict")
 async def predict_from_file(file: UploadFile = File(...)):

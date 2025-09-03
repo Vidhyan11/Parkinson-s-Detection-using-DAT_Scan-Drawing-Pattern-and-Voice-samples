@@ -1,339 +1,440 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { gsap } from 'gsap'
-import { 
-  Mic, 
-  Upload, 
-  Play, 
-  Pause, 
-  Square, 
-  FileAudio, 
-  BarChart3,
-  Loader2,
-  CheckCircle,
-  AlertCircle,
-  Info,
-  Shield
-} from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import VoiceRecorder from '@/components/VoiceRecorder'
-import FileUpload from '@/components/FileUpload'
-import AudioPlayer from '@/components/AudioPlayer'
-import { useAnalysisStore } from '@/store/analysisStore'
 import { toast } from 'react-hot-toast'
+import { 
+  ArrowLeft, 
+  ArrowRight, 
+  CheckCircle, 
+  Loader2,
+  Brain,
+  Mic,
+  PenTool
+} from 'lucide-react'
+
+import PatientInfoForm from '@/components/PatientInfoForm'
+import VoiceRecorder from '@/components/VoiceRecorder'
+import DATScanUploadSection from '@/components/DATScanUploadSection'
+import SpiralDrawingSection from '@/components/SpiralDrawingSection'
+import AnalysisProgress from '@/components/AnalysisProgress'
+import { useAnalysisStore, PatientInfo } from '@/store/analysisStore'
+
+type AnalysisStep = 'patient-info' | 'data-collection' | 'analysis' | 'complete'
 
 export default function AnalysisPage() {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<'record' | 'upload'>('record')
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [audioData, setAudioData] = useState<{
-    blob?: Blob
-    url?: string
-    duration?: number
-    type: 'recorded' | 'uploaded'
-  } | null>(null)
+  const [currentStep, setCurrentStep] = useState<AnalysisStep>('patient-info')
+  const [patientInfo, setPatientInfo] = useState<PatientInfo | null>(null)
+  const [analysisData, setAnalysisData] = useState<{
+    voice?: { blob: Blob; url: string; duration: number }
+    datscan?: File
+    spiral?: { imageData: string; drawingTime: number }
+  }>({})
   
-  const { setAnalysisData } = useAnalysisStore()
-  const pageRef = useRef<HTMLDivElement>(null)
+  const { 
+    setPatientInfo: setStorePatientInfo,
+    setMultimodalResults,
+    setIsLoading,
+    setError,
+    setAnalysisProgress,
+    analysisProgress
+  } = useAnalysisStore()
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
+  const steps = [
+    { id: 'patient-info', title: 'Patient Information', icon: CheckCircle },
+    { id: 'data-collection', title: 'Data Collection', icon: CheckCircle },
+    { id: 'analysis', title: 'Analysis', icon: Loader2 },
+    { id: 'complete', title: 'Complete', icon: CheckCircle }
+  ]
 
-    // Page entrance animation
-    const tl = gsap.timeline()
-    tl.fromTo('.page-header', 
-      { y: 50, opacity: 0 }, 
-      { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }
-    )
-    .fromTo('.tab-container', 
-      { y: 30, opacity: 0 }, 
-      { y: 0, opacity: 1, duration: 0.6, ease: 'power3.out' }, 
-      '-=0.4'
-    )
-    .fromTo('.content-area', 
-      { y: 50, opacity: 0 }, 
-      { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 
-      '-=0.6'
-    )
-
-    return () => {
-      tl.kill()
-    }
-  }, [])
-
-  const handleAudioReady = (data: {
-    blob: Blob
-    url: string
-    duration: number
-    type: 'recorded' | 'uploaded'
-  }) => {
-    setAudioData(data)
-    toast.success('Audio ready for analysis!')
+  const handlePatientInfoComplete = (data: PatientInfo) => {
+    setPatientInfo(data)
+    setStorePatientInfo(data)
+    setCurrentStep('data-collection')
   }
 
-  const handleAnalysis = async () => {
-    if (!audioData?.blob) {
-      toast.error('Please record or upload audio first')
+  const handleVoiceData = (data: { blob: Blob; url: string; duration: number; type: 'recorded' | 'uploaded' }) => {
+    setAnalysisData(prev => ({ 
+      ...prev, 
+      voice: { 
+        blob: data.blob, 
+        url: data.url, 
+        duration: data.duration 
+      } 
+    }))
+    toast.success('Voice data captured successfully!')
+  }
+
+  const handleDATScanData = (file: File) => {
+    setAnalysisData(prev => ({ ...prev, datscan: file }))
+    toast.success('DATScan image uploaded successfully!')
+  }
+
+  const handleSpiralData = (imageData: string, drawingTime: number) => {
+    setAnalysisData(prev => ({ ...prev, spiral: { imageData, drawingTime } }))
+    toast.success('Spiral drawing completed successfully!')
+  }
+
+  const canProceedToAnalysis = () => {
+    if (!patientInfo) return false
+    
+    const { voice, datscan, spiral } = analysisData
+    const { analysisTypes } = patientInfo
+    
+    return (
+      (analysisTypes.voice && voice) ||
+      (analysisTypes.datscan && datscan) ||
+      (analysisTypes.spiral && spiral)
+    )
+  }
+
+  const startAnalysis = async () => {
+    if (!canProceedToAnalysis()) {
+      toast.error('Please complete at least one data collection step')
       return
     }
 
-    setIsAnalyzing(true)
-    
+    setCurrentStep('analysis')
+    setIsLoading(true)
+    setError(null)
+
     try {
-      let result
-      
-      if (audioData.type === 'uploaded') {
-        // For uploaded files, use the predict endpoint with FormData
-        const formData = new FormData()
-        formData.append('file', audioData.blob, 'audio.wav')
-        
-        const response = await fetch('/api/predict', {
-          method: 'POST',
-          body: formData,
-        })
-
-        if (!response.ok) {
-          throw new Error('Analysis failed')
-        }
-
-        result = await response.json()
-      } else {
-        // For recorded audio, use the record endpoint with base64
-        const arrayBuffer = await audioData.blob.arrayBuffer()
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-        
-        const response = await fetch('/api/record', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            audio_data: base64,
-            duration: audioData.duration || 0,
-            sample_rate: 16000
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error('Analysis failed')
-        }
-
-        result = await response.json()
-      }
-      
-      // Store analysis data
-      setAnalysisData({
-        ...result,
-        audioData: audioData,
-        timestamp: new Date().toISOString()
+      // Initialize progress
+      setAnalysisProgress({
+        voice: 0,
+        datscan: 0,
+        spiral: 0,
+        overall: 0
       })
 
-      // Navigate to results
-      router.push('/results')
-      
+      // Simulate analysis progress
+      await simulateAnalysis()
+
+      // Perform actual analysis
+      const results = await performMultimodalAnalysis()
+
+      if (results) {
+        setMultimodalResults(results)
+        setCurrentStep('complete')
+        toast.success('Analysis completed successfully!')
+      } else {
+        throw new Error('Analysis failed')
+      }
+
     } catch (error) {
       console.error('Analysis error:', error)
+      setError(error instanceof Error ? error.message : 'Analysis failed')
       toast.error('Analysis failed. Please try again.')
     } finally {
-      setIsAnalyzing(false)
+      setIsLoading(false)
     }
   }
 
-  const tabs = [
-    { id: 'record', label: 'Record Voice', icon: Mic },
-    { id: 'upload', label: 'Upload File', icon: Upload }
-  ]
+  const simulateAnalysis = async () => {
+    const { analysisTypes } = patientInfo!
+    const totalSteps = Object.values(analysisTypes).filter(Boolean).length
+    let completedSteps = 0
+
+    // Simulate voice analysis
+    if (analysisTypes.voice && analysisData.voice) {
+      for (let i = 0; i <= 100; i += 10) {
+        setAnalysisProgress(prev => ({ ...prev, voice: i }))
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+      completedSteps++
+    }
+
+    // Simulate DATScan analysis
+    if (analysisTypes.datscan && analysisData.datscan) {
+      for (let i = 0; i <= 100; i += 8) {
+        setAnalysisProgress(prev => ({ ...prev, datscan: i }))
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      completedSteps++
+    }
+
+    // Simulate spiral analysis
+    if (analysisTypes.spiral && analysisData.spiral) {
+      for (let i = 0; i <= 100; i += 12) {
+        setAnalysisProgress(prev => ({ ...prev, spiral: i }))
+        await new Promise(resolve => setTimeout(resolve, 150))
+      }
+      completedSteps++
+    }
+
+    // Update overall progress
+    for (let i = 0; i <= 100; i += 5) {
+      setAnalysisProgress(prev => ({ ...prev, overall: i }))
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+  }
+
+  const performMultimodalAnalysis = async () => {
+    try {
+      const formData = new FormData()
+      
+      // Add patient metadata
+      if (patientInfo?.age) formData.append('patient_age', patientInfo.age.toString())
+      if (patientInfo?.gender) formData.append('patient_gender', patientInfo.gender)
+      
+      // Add voice data
+      if (analysisData.voice) {
+        formData.append('voice_file', analysisData.voice.blob, 'voice.wav')
+      }
+      
+      // Add DATScan data
+      if (analysisData.datscan) {
+        formData.append('datscan_file', analysisData.datscan)
+      }
+      
+      // Add spiral data
+      if (analysisData.spiral) {
+        formData.append('spiral_data', analysisData.spiral.imageData)
+        formData.append('drawing_time', analysisData.spiral.drawingTime.toString())
+      }
+
+      const response = await fetch('/api/multimodal-analysis', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Analysis failed: ${response.statusText}`)
+      }
+
+      return await response.json()
+
+    } catch (error) {
+      console.error('API call failed:', error)
+      throw error
+    }
+  }
+
+  const goToResults = () => {
+    router.push('/results')
+  }
+
+  const resetAnalysis = () => {
+    setCurrentStep('patient-info')
+    setAnalysisData({})
+    setPatientInfo(null)
+    setStorePatientInfo(null)
+    setError(null)
+    setAnalysisProgress({ voice: 0, datscan: 0, spiral: 0, overall: 0 })
+  }
 
   return (
-    <div ref={pageRef} className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
-      <div className="container-custom py-12">
-        {/* Page Header */}
-        <motion.div className="page-header text-center mb-12">
-          <h1 className="font-display text-4xl md:text-5xl font-bold text-text-primary mb-6">
-            ParkIQ Voice Analysis
-          </h1>
-          <p className="text-xl text-text-secondary max-w-3xl mx-auto">
-            Record your voice or upload an audio file to analyze for early signs of Parkinson's disease. 
-            Our AI system will examine 35 voice biomarkers to provide accurate results.
-          </p>
-        </motion.div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 relative overflow-hidden">
+      {/* Background decorative elements */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-blue-200/20 to-purple-200/20 rounded-full blur-3xl animate-pulse-slow"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-to-br from-indigo-200/20 to-blue-200/20 rounded-full blur-3xl animate-pulse-slow" style={{animationDelay: '2s'}}></div>
+      </div>
 
-        {/* Tab Navigation */}
-        <motion.div className="tab-container mb-8">
-          <div className="flex justify-center">
-            <div className="bg-white rounded-xl p-2 shadow-soft border border-border">
-              {tabs.map((tab) => {
-                const Icon = tab.icon
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as 'record' | 'upload')}
-                    className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2 ${
-                      activeTab === tab.id
-                        ? 'bg-primary-500 text-white shadow-glow'
-                        : 'text-text-secondary hover:text-text-primary hover:bg-gray-50'
-                    }`}
-                  >
-                    <Icon className="w-5 h-5" />
-                    <span>{tab.label}</span>
-                  </button>
-                )
-              })}
+      {/* Content */}
+      <div className="relative z-10">
+        {/* Header */}
+        <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200/50 sticky top-0 z-20 shadow-soft">
+          <div className="max-w-6xl mx-auto px-4">
+            {/* Header */}
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                Multi-Modal Parkinson's Analysis
+              </h1>
+              <p className="text-gray-600">
+                Comprehensive assessment using voice, brain imaging, and motor skills
+              </p>
+            </div>
+
+            {/* Progress Steps */}
+            <div className="mb-8">
+              <div className="flex items-center justify-center">
+                {steps.map((step, index) => (
+                  <div key={step.id} className="flex items-center">
+                    <div className="flex flex-col items-center">
+                      <div className={`
+                        w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
+                        ${currentStep === step.id 
+                          ? 'bg-blue-600 text-white' 
+                          : index < steps.findIndex(s => s.id === currentStep)
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-200 text-gray-600'
+                        }
+                      `}>
+                        {index < steps.findIndex(s => s.id === currentStep) ? (
+                          <CheckCircle className="w-5 h-5" />
+                        ) : currentStep === step.id ? (
+                          <step.icon className="w-5 h-5" />
+                        ) : (
+                          index + 1
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-600 mt-2 text-center max-w-20">
+                        {step.title}
+                      </span>
+                    </div>
+                    {index < steps.length - 1 && (
+                      <div className={`
+                        w-16 h-0.5 mx-4
+                        ${index < steps.findIndex(s => s.id === currentStep) 
+                          ? 'bg-green-600' 
+                          : 'bg-gray-200'
+                        }
+                      `} />
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        {/* Content Area */}
-        <motion.div className="content-area">
-          <div className="max-w-4xl mx-auto">
-            {/* Tab Content */}
-            <AnimatePresence mode="wait">
-              {activeTab === 'record' ? (
-                <motion.div
-                  key="record"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="card p-8"
-                >
-                  <div className="text-center mb-8">
-                    <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Mic className="w-10 h-10 text-primary-600" />
-                    </div>
-                    <h2 className="text-2xl font-semibold text-text-primary mb-2">
-                      Record Your Voice
-                    </h2>
-                    <p className="text-text-secondary">
-                      Speak clearly into your microphone for best results. We recommend saying 
-                      the vowel "ah" for 3-5 seconds or reading a short passage.
-                    </p>
-                  </div>
-                  
-                  <VoiceRecorder onAudioReady={handleAudioReady} />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="upload"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="card p-8"
-                >
-                  <div className="text-center mb-8">
-                    <div className="w-20 h-20 bg-secondary-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Upload className="w-10 h-10 text-secondary-600" />
-                    </div>
-                    <h2 className="text-2xl font-semibold text-text-primary mb-2">
-                      Upload Audio File
-                    </h2>
-                    <p className="text-text-secondary">
-                      Upload a WAV file (max 50MB) for analysis. Supported formats: WAV only.
-                    </p>
-                  </div>
-                  
-                  <FileUpload onAudioReady={handleAudioReady} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Audio Preview */}
-            {audioData && (
+        {/* Main Content */}
+        <div className="container-custom py-8">
+          {/* Step Content */}
+          <AnimatePresence mode="wait">
+            {currentStep === 'patient-info' && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="card p-6 mt-8"
+                key="patient-info"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
               >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-text-primary flex items-center">
-                    <FileAudio className="w-5 h-5 mr-2" />
-                    Audio Preview
-                  </h3>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-text-secondary">
-                      Duration: {audioData.duration?.toFixed(1)}s
-                    </span>
-                    <span className={`badge ${
-                      audioData.type === 'recorded' ? 'badge-primary' : 'badge-secondary'
-                    }`}>
-                      {audioData.type === 'recorded' ? 'Recorded' : 'Uploaded'}
-                    </span>
+                <PatientInfoForm onComplete={handlePatientInfoComplete} />
+              </motion.div>
+            )}
+
+            {currentStep === 'data-collection' && (
+              <motion.div
+                key="data-collection"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-8"
+              >
+                {/* Voice Analysis */}
+                {patientInfo?.analysisTypes.voice && (
+                  <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-6 shadow-soft">
+                    <VoiceRecorder onAudioReady={handleVoiceData} />
                   </div>
-                </div>
-                
-                <AudioPlayer audioUrl={audioData.url!} />
-                
-                <div className="mt-6 flex justify-center">
+                )}
+
+                {/* DATScan Analysis */}
+                {patientInfo?.analysisTypes.datscan && (
+                  <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-6 shadow-soft">
+                    <DATScanUploadSection
+                      onImageUpload={handleDATScanData}
+                      onRemove={() => setAnalysisData(prev => ({ ...prev, datscan: undefined }))}
+                      currentFile={analysisData.datscan}
+                    />
+                  </div>
+                )}
+
+                {/* Spiral Analysis */}
+                {patientInfo?.analysisTypes.spiral && (
+                  <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 rounded-lg p-6 shadow-soft">
+                    <SpiralDrawingSection
+                      onDrawingComplete={handleSpiralData}
+                      onRemove={() => setAnalysisData(prev => ({ ...prev, spiral: undefined }))}
+                    />
+                  </div>
+                )}
+
+                {/* Navigation */}
+                <div className="flex justify-between items-center pt-6">
                   <button
-                    onClick={handleAnalysis}
-                    disabled={isAnalyzing}
-                    className="btn-primary text-lg px-8 py-3 hover-lift disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setCurrentStep('patient-info')}
+                    className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
                   >
-                    {isAnalyzing ? (
-                      <>
-                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                        Analyzing...
-                      </>
-                    ) : (
-                      <>
-                        <BarChart3 className="w-5 h-5 mr-2" />
-                        Analyze Voice
-                      </>
-                    )}
+                    <ArrowLeft className="w-4 h-4" />
+                    Back to Patient Info
+                  </button>
+
+                  <button
+                    onClick={startAnalysis}
+                    disabled={!canProceedToAnalysis()}
+                    className={`
+                      px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center gap-2
+                      ${canProceedToAnalysis()
+                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      }
+                    `}
+                  >
+                    <Brain className="w-5 h-5" />
+                    Start Multi-Modal Analysis
                   </button>
                 </div>
               </motion.div>
             )}
 
-            {/* Instructions */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="card p-6 mt-8 bg-blue-50 border-blue-200"
-            >
-              <div className="flex items-start space-x-3">
-                <Info className="w-6 h-6 text-blue-600 mt-1 flex-shrink-0" />
-                <div>
-                  <h4 className="font-semibold text-blue-900 mb-2">
-                    Tips for Best Results
-                  </h4>
-                  <ul className="text-blue-800 space-y-1 text-sm">
-                    <li>• Speak clearly and at a normal volume</li>
-                    <li>• Minimize background noise</li>
-                    <li>• Record in a quiet environment</li>
-                    <li>• Use a good quality microphone if possible</li>
-                    <li>• Avoid recording during illness or voice strain</li>
-                  </ul>
-                </div>
-              </div>
-            </motion.div>
+            {currentStep === 'analysis' && (
+              <motion.div
+                key="analysis"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <AnalysisProgress
+                  progress={analysisProgress}
+                  modelsUsed={patientInfo?.analysisTypes ? 
+                    Object.entries(patientInfo.analysisTypes)
+                      .filter(([_, enabled]) => enabled)
+                      .map(([key, _]) => key)
+                    : []
+                  }
+                  isComplete={false}
+                  totalTime={0}
+                />
+              </motion.div>
+            )}
 
-            {/* Privacy Notice */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="card p-6 mt-6 bg-gray-50 border-gray-200"
-            >
-              <div className="flex items-start space-x-3">
-                <Shield className="w-6 h-6 text-gray-600 mt-1 flex-shrink-0" />
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">
-                    Privacy & Security
-                  </h4>
-                  <p className="text-gray-700 text-sm">
-                    Your audio data is processed securely and temporarily. We do not store your voice recordings 
-                    permanently. All analysis is performed using encrypted connections and follows HIPAA guidelines.
+            {currentStep === 'complete' && (
+              <motion.div
+                key="complete"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+                className="text-center space-y-6"
+              >
+                <div className="bg-green-50/80 backdrop-blur-sm border border-green-200/50 rounded-lg p-8 shadow-soft">
+                  <div className="flex justify-center mb-4">
+                    <div className="p-3 bg-green-100 rounded-full">
+                      <CheckCircle className="w-12 h-12 text-green-600" />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-green-900 mb-2">
+                    Analysis Complete!
+                  </h2>
+                  <p className="text-green-700 mb-6">
+                    Your multi-modal analysis has been completed successfully. 
+                    View your comprehensive results and clinical report.
                   </p>
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                    <button
+                      onClick={goToResults}
+                      className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors shadow-soft hover:shadow-medium"
+                    >
+                      View Results
+                    </button>
+                    <button
+                      onClick={resetAnalysis}
+                      className="px-6 py-3 bg-gray-600 text-white rounded-lg font-medium hover:bg-gray-700 transition-colors shadow-soft hover:shadow-medium"
+                    >
+                      Start New Analysis
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   )
